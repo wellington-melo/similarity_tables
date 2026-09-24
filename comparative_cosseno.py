@@ -1,70 +1,148 @@
-## BIBLIOTECAS UTILIZADAS
+# ---------------------------------------------------------------------------------------------- #
+#    BIBLIOTECAS
+# ---------------------------------------------------------------------------------------------- #
 
-import pandas as pd
+import logging
 import nltk
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import string
+
+# Configuracao log
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 # Baixar recursos necessários do NLTK
-nltk.download('punkt')
 
-# Ler o csv com tabelas e printar ele
-csv_path = 'tables.csv'
-data = pd.read_csv(csv_path)
+nltk.download("punkt")
 
-# Extrair palavras-chave usando TF-IDF e retorna a matriz TF-IDF
-def extract_keywords(texts):
-    vectorizer = TfidfVectorizer(stop_words='english')
+
+# ---------------------------------------------------------------------------------------------- #
+#    FUNCOES GERAIS
+# ---------------------------------------------------------------------------------------------- #
+
+def extract_keywords(texts: list) -> any:
+    
+    """
+    Extrai características textuais e gera a matriz TF-IDF (Term Frequency-Inverse Document Frequency).
+
+    Utiliza o TfidfVectorizer do scikit-learn aplicando remoção de stop words.
+
+    Parâmetros:
+        texts (list): Lista de strings contendo os textos consolidados de cada tabela.
+
+    Retorno:
+        scipy.sparse.matrix: Matriz esparsa contendo os pesos TF-IDF dos termos.
+        
+    """
+    logger.info("Aplicando vetorização TF-IDF nos textos das tabelas")
+    vectorizer = TfidfVectorizer(stop_words="english")
     X = vectorizer.fit_transform(texts)
     return X
 
-# Cálculo da similaridade de cosseno entre as chaves das tabelas
-def calculate_similarity(matrix):
+
+def calculate_similarity(matrix: any) -> any:
+    
+    """
+    Calcula a similaridade de cosseno entre todos os vetores da matriz fornecida.
+
+    Parâmetros:
+        matrix (any): Matriz numérica de características (ex: matriz TF-IDF).
+
+    Retorno:
+        numpy.ndarray: Matriz quadrada de similaridade de cosseno.
+        
+    """
+    logger.info("Calculando a similaridade de cosseno entre as matrizes de características.")
     return cosine_similarity(matrix)
 
-# Comparar tabelas com base nos campos e chave primária
-def compare_tables(data, table_col, db_col, schema_col, field_col):
-    """Compara tabelas com base nas informações dos campos."""
-    # Criar uma coluna combinada para identificação completa
-    data['full_table_id'] = data[db_col] + '.' + data[schema_col] + '.' + data[table_col]
+
+def compare_tables(data: pd.DataFrame, table_col: str, db_col: str, schema_col: str, field_col: str) -> pd.DataFrame:
     
-    # Obter todos os nomes de tabelas únicas
-    unique_tables = data['full_table_id'].unique()
+    """
+    Compara o conteúdo de diferentes tabelas com base nos nomes de seus campos utilizando a vetorização TF-IDF e a Similaridade de Cosseno.
+
+    Parâmetros:
+        data (pd.DataFrame): DataFrame contendo os metadados brutos das tabelas.
+        table_col (str): Nome da coluna que identifica a tabela.
+        db_col (str): Nome da coluna que identifica o banco de dados.
+        schema_col (str): Nome da coluna que identifica o schema.
+        field_col (str): Nome da coluna que identifica o campo/coluna da tabela.
+
+    Retorno:
+        pd.DataFrame: Matriz de similaridade de cosseno em formato DataFrame pandas, onde linhas e colunas representam os IDs completos das tabelas.
+    
+    """
+    
+    logger.info("Iniciando o mapeamento e consolidação dos campos por tabela.")
+
+    # Coluna combinada convertendo para string para garantir unicidade
+    
+    data["full_table_id"] = (data[db_col].astype(str) + "." + data[schema_col].astype(str) + "." + data[table_col].astype(str))
+    unique_tables = data["full_table_id"].unique()
     table_texts = {}
 
+    # Iterar por cada identificador único de tabela para concatenar seus respectivos campos
+    
     for table_id in unique_tables:
-        # Filtrar dados da tabela específica
-        table_data = data[data['full_table_id'] == table_id]
         
-        # Concatenar o texto de todos os campos
-        concatenated_text = ' '.join(table_data[field_col].astype(str).tolist())
+        # Filtrar apenas as linhas pertencentes à tabela atual
+        table_data = data[data["full_table_id"] == table_id]
+        
+        # Concatenar todos os nomes de campos em uma única string espaçada
+        concatenated_text = " ".join(table_data[field_col].astype(str).tolist())
         table_texts[table_id] = concatenated_text
     
-    # Criar a matriz TF-IDF
+    logger.info(f"Total de tabelas mapeadas: {len(unique_tables)}. Gerando matriz TF-IDF.")
+
+    # Matriz TF-IDF utilizando os textos consolidados
+    
     matrix = extract_keywords(list(table_texts.values()))
     
-    # Calcular similaridade entre tabelas
+    # Calcular a similaridade de cosseno com base na matriz TF-IDF gerada
     similarity_matrix = calculate_similarity(matrix)
     
-    # Criar um DataFrame para visualizar a similaridade
-    similarity_df = pd.DataFrame(similarity_matrix, index=table_texts.keys(), columns=table_texts.keys())
+    # Converter o resultado em um DataFrame estruturado utilizando as chaves das tabelas
+    similarity_df = pd.DataFrame(
+        similarity_matrix, 
+        index=list(table_texts.keys()), 
+        columns=list(table_texts.keys())
+    )
     
+    logger.info("Processo de comparação de tabelas concluído com sucesso.")
     return similarity_df
 
-# Definir colunas esperadas no CSV
-table_col = 'TABELA'
-db_col = 'DATABASE'
-schema_col = 'SCHEMA'
-field_col = 'CAMPO'
 
-# Caminho para o arquivo CSV de saída
-output_csv_path = 'cosseno_similarity.csv'
+# ---------------------------------------------------------------------------------------------- #
+#    FLUXO PRINCIPAL DE EXECUÇÃO
+# ---------------------------------------------------------------------------------------------- #
 
-# Comparar tabelas e calcular similaridade
-similarity_df = compare_tables(data, table_col, db_col, schema_col, field_col)
+if __name__ == "__main__":
+    
+    # Colunas csv
+    TABLE_COL = "TABELA"
+    DB_COL = "DATABASE"
+    SCHEMA_COL = "SCHEMA"
+    FIELD_COL = "CAMPO"
 
-# Salvar a matriz de similaridade em um novo arquivo CSV
-similarity_df.to_csv(output_csv_path)
+    # Path input / output
+    CSV_PATH = "tables.csv"
+    OUTPUT_CSV_PATH = "cosseno_similarity.csv"
 
-print(f"Matriz de Similaridade entre tabelas salva em: {output_csv_path}")
+    try:
+        logger.info(f"Lendo o arquivo de entrada: {CSV_PATH}")
+        data = pd.read_csv(CSV_PATH)
+        similarity_df = compare_tables(data, TABLE_COL, DB_COL, SCHEMA_COL, FIELD_COL)
+        similarity_df.to_csv(OUTPUT_CSV_PATH)
+        logger.info(f"Matriz de Similaridade por Cosseno salva com sucesso em: {OUTPUT_CSV_PATH}")
+
+    except FileNotFoundError:
+        logger.error(f"O arquivo '{CSV_PATH}' não foi encontrado no diretório. Verifique o caminho.")
+        
+    except Exception as e:
+        logger.error(f"Ocorreu um erro inesperado durante a execução do pipeline: {e}")
